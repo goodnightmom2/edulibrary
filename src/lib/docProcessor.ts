@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import * as XLSX from 'xlsx';
 import { convertOmmlNodesToLatex, type OrderedXmlNode } from './ommlToLatex.ts';
+import { convertEmfToSvg, convertWmfToSvg } from './wmfToSvg.ts';
 
 export interface MathMeta {
   ommlCount: number;
@@ -131,12 +132,17 @@ function renderRun(runNode: OrderedXmlNode, ctx: RenderContext): string {
     } else if (k === 'w:object') {
       ctx.mathMeta.mathTypeOleCount += 1;
       const rawXml = JSON.stringify(child);
-      const embedMatch = rawXml.match(/"@_r:(?:embed|id)":"(rId\d+)"/);
-      const target = embedMatch ? ctx.rels[embedMatch[1]] : undefined;
-      const dataUri = target ? ctx.mediaDataUris[target] : undefined;
+      let dataUri: string | undefined;
+      for (const match of rawXml.matchAll(/"@_r:(?:embed|id)":"(rId\d+)"/g)) {
+        const target = ctx.rels[match[1]];
+        if (target && ctx.mediaDataUris[target]) {
+          dataUri = ctx.mediaDataUris[target];
+          break;
+        }
+      }
       if (dataUri) {
         ctx.mathMeta.fallbackImagesCount += 1;
-        html += `<img src="${dataUri}" alt="Công thức MathType" class="edu-mathtype-img" />`;
+        html += `<img src="${dataUri}" alt="Công thức MathType" class="edu-mathtype-img" style="display:inline-block;vertical-align:middle;max-width:100%;margin:0 2px;" />`;
       } else {
         ctx.mathMeta.supportsFullPreview = false;
         html += `<span class="edu-ole-warning">[Công thức MathType OLE — Tải file Word gốc để xem đầy đủ]</span>`;
@@ -316,6 +322,16 @@ async function processDocx(buffer: Buffer): Promise<DocumentPreviewPayload> {
         mediaDataUris[relKey] = `data:${mimeMap[ext]};base64,${b64}`;
       } else if (ext === '.wmf' || ext === '.emf') {
         vectorFormulaImages += 1;
+        try {
+          const rawBuf = await zip.files[fileName].async('nodebuffer');
+          const svg = ext === '.wmf' ? convertWmfToSvg(rawBuf) : convertEmfToSvg(rawBuf);
+          if (svg) {
+            const relKey = fileName.replace(/^word\//, '');
+            mediaDataUris[relKey] = `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
+          }
+        } catch {
+          // Ignore malformed vector image and fall back to warning badge
+        }
       }
     } else if (fileName.startsWith('word/embeddings/oleObject')) {
       oleFileCount += 1;
@@ -360,10 +376,10 @@ async function processDocx(buffer: Buffer): Promise<DocumentPreviewPayload> {
     mathMeta.ommlCount + mathMeta.mathTypeOleCount + (mathMeta.formulaImageCount || 0);
   mathMeta.postCheckPreserved = mathMeta.convertedCount + mathMeta.fallbackImagesCount;
 
-  if (mathMeta.mathTypeOleCount > 0 || vectorFormulaImages > 0) {
+  if (mathMeta.mathTypeOleCount > mathMeta.fallbackImagesCount) {
     mathMeta.supportsFullPreview = false;
     mathMeta.warnings.push(
-      `Phát hiện ${mathMeta.mathTypeOleCount} đối tượng MathType OLE và ${vectorFormulaImages} công thức dạng ảnh vector (.wmf/.emf). Hệ thống giữ nguyên file Word gốc để bạn tải xuống nhằm bảo toàn 100% công thức.`
+      `Phát hiện ${mathMeta.mathTypeOleCount} đối tượng MathType OLE (đã dựng ${mathMeta.fallbackImagesCount} công thức vector sang SVG). Vui lòng tải file Word gốc để đối chiếu các công thức còn lại.`
     );
   }
   if (mathMeta.ommlCount > mathMeta.convertedCount) {
