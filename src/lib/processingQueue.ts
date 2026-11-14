@@ -187,6 +187,13 @@ export async function enqueueDocumentProcessing(
     })
     .returning();
 
+  if (process.env.VERCEL) {
+    // On Vercel Serverless, background tasks are frozen once the HTTP response returns.
+    // Run the conversion inline before responding so documents reach COMPLETED reliably.
+    await processDocumentJob(job.id);
+    return { jobId: job.id, status: 'PENDING' };
+  }
+
   // Schedule non-blocking asynchronous execution so upload HTTP requests respond immediately
   setImmediate(() => {
     void processDocumentJob(job.id);
