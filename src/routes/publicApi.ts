@@ -28,9 +28,12 @@ import {
 import { z } from 'zod';
 import { findUserByEmail, toSafeUser } from '../db/users.ts';
 import { generateDocumentPreview, type DocumentPreviewPayload } from '../lib/docProcessor.ts';
+import { getDocumentFile } from '../lib/documentFiles.ts';
 import {
   createPresignedDownloadUrl,
   DOCUMENTS_DIR,
+  isR2Configured,
+  PREVIEWS_DIR,
   readStoredObjectBuffer,
   resolveSafeStoragePath,
 } from '../lib/storage.ts';
@@ -191,11 +194,12 @@ publicApiRouter.get('/documents/:slug', optionalAuth, async (req: AuthRequest, r
   }
 });
 
-// Stream raw document file (inline for PDF.js or attachment for download)
+// Stream preview PDF (inline on web) or original file (.docx attachment for download)
 publicApiRouter.get('/documents/:slug/file', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
     const slug = String(req.params.slug || '');
     const isDownload = req.query.download === '1' || req.query.download === 'true';
+    const wantPreviewPdf = !isDownload && (req.query.mode === 'preview' || Boolean(req.query.mode === undefined));
 
     const rows = await db
       .select()
@@ -212,12 +216,50 @@ publicApiRouter.get('/documents/:slug/file', optionalAuth, async (req: AuthReque
       return res.status(404).json({ error: 'Tài liệu không tồn tại hoặc đang được xử lý.' });
     }
 
+    // Serve paired PDF preview when viewing online (?mode=preview or previewStorageKey exists)
+    if (wantPreviewPdf && (doc.previewStorageKey || req.query.mode === 'preview')) {
+      const pdfDisplayName = `${doc.originalFilename.replace(/\.[^.]+$/, '') || doc.slug}.pdf`;
+      const encodedPdfName = encodeURIComponent(pdfDisplayName);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${encodedPdfName}"; filename*=UTF-8''${encodedPdfName}`
+      );
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+
+      if (doc.previewStorageKey) {
+        try {
+          const previewPath = resolveSafeStoragePath(PREVIEWS_DIR, doc.previewStorageKey);
+          await fs.access(previewPath);
+          return res.sendFile(previewPath);
+        } catch {
+          if (isR2Configured()) {
+            try {
+              const buffer = await readStoredObjectBuffer('previews', doc.previewStorageKey);
+              return res.send(buffer);
+            } catch {
+              // continue to DB fallback
+            }
+          }
+        }
+      }
+
+      const dbPreview = await getDocumentFile(doc.id, 'PREVIEW_PDF');
+      if (dbPreview) {
+        return res.send(dbPreview.buffer);
+      }
+
+      if (doc.fileType !== 'pdf') {
+        return res.status(404).json({ error: 'Tệp PDF xem trước không còn trên máy chủ.' });
+      }
+    }
+
     if (isDownload) {
       void recordDocumentDownload(doc.id, req.dbUser?.id);
     }
 
     // If stored in Cloudflare R2 and downloading as attachment, redirect to short-lived Presigned URL
-    if (isDownload && doc.storageProvider === 'R2' && doc.storageKey) {
+    if (isDownload && isR2Configured() && doc.storageProvider === 'R2' && doc.storageKey) {
       const signedUrl = await createPresignedDownloadUrl(doc.storageKey, doc.originalFilename, 300);
       if (signedUrl) {
         return res.redirect(302, signedUrl);
@@ -237,10 +279,20 @@ publicApiRouter.get('/documents/:slug/file', optionalAuth, async (req: AuthReque
       await fs.access(fullPath);
       return res.sendFile(fullPath);
     } catch {
-      if (doc.storageProvider === 'R2' && doc.storageKey) {
-        const buffer = await readStoredObjectBuffer('originals', doc.storageKey);
-        return res.send(buffer);
+      if (isR2Configured() && doc.storageProvider === 'R2' && doc.storageKey) {
+        try {
+          const buffer = await readStoredObjectBuffer('originals', doc.storageKey);
+          return res.send(buffer);
+        } catch {
+          // continue to DB fallback
+        }
       }
+
+      const dbOriginal = await getDocumentFile(doc.id, 'ORIGINAL');
+      if (dbOriginal) {
+        return res.send(dbOriginal.buffer);
+      }
+
       return res.status(404).json({ error: 'Tệp tài liệu không còn trên máy chủ.' });
     }
   } catch (error) {

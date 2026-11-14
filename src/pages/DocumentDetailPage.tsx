@@ -170,7 +170,7 @@ export function DocumentDetailPage({ slug, onNavigate }: DocumentDetailPageProps
   }
 
   const { document: doc, preview, related, comments } = detail;
-  const inlineFileUrl = `/api/documents/${encodeURIComponent(doc.slug)}/file`;
+  const inlineFileUrl = `/api/documents/${encodeURIComponent(doc.slug)}/file?mode=preview`;
   const downloadUrl = `/api/documents/${encodeURIComponent(doc.slug)}/file?download=1`;
 
   return (
@@ -282,7 +282,7 @@ export function DocumentDetailPage({ slug, onNavigate }: DocumentDetailPageProps
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold shadow-xs transition-colors whitespace-nowrap"
               >
                 <Download className="w-4 h-4" />
-                <span>Tải xuống</span>
+                <span>Tải xuống ({doc.fileType.toUpperCase()})</span>
               </a>
             </div>
           </div>

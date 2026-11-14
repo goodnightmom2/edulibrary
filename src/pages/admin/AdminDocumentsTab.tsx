@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Edit3,
   Eye,
+  FileText,
   FileUp,
   Plus,
   RotateCcw,
@@ -56,9 +57,10 @@ export function AdminDocumentsTab({
   const [tagsText, setTagsText] = useState('');
   const [status, setStatus] = useState<'PUBLISHED' | 'DRAFT'>('PUBLISHED');
   const [featured, setFeatured] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [docxFile, setDocxFile] = useState<File | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [thumbFile, setThumbFile] = useState<File | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+  const [dragTarget, setDragTarget] = useState<'docx' | 'pdf' | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
 
@@ -95,7 +97,8 @@ export function AdminDocumentsTab({
     setTagsText('');
     setStatus('PUBLISHED');
     setFeatured(false);
-    setSelectedFiles([]);
+    setDocxFile(null);
+    setPdfFile(null);
     setThumbFile(null);
     setUploadProgress(0);
     setModalOpen(true);
@@ -113,7 +116,8 @@ export function AdminDocumentsTab({
     setTagsText((doc.tags || []).map((t) => t.name).join(', '));
     setStatus(doc.status === 'DRAFT' ? 'DRAFT' : 'PUBLISHED');
     setFeatured(doc.featured);
-    setSelectedFiles([]);
+    setDocxFile(null);
+    setPdfFile(null);
     setThumbFile(null);
     setUploadProgress(0);
     setModalOpen(true);
@@ -135,6 +139,16 @@ export function AdminDocumentsTab({
         }
       };
       xhr.onload = () => {
+        if (xhr.status === 413) {
+          resolve({
+            ok: false,
+            data: {
+              error:
+                'Tổng dung lượng 2 tệp vượt quá giới hạn ~4.5MB của máy chủ Vercel. Vui lòng nén nhỏ tệp PDF hơn trước khi tải lên.',
+            },
+          });
+          return;
+        }
         try {
           const parsed = JSON.parse(xhr.responseText || '{}');
           resolve({ ok: xhr.status >= 200 && xhr.status < 300, data: parsed });
@@ -149,75 +163,63 @@ export function AdminDocumentsTab({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingDoc && selectedFiles.length === 0) {
-      showToast('Vui lòng chọn ít nhất 1 tệp tài liệu.', 'error');
+    if (!editingDoc) {
+      if (!docxFile) {
+        showToast('Vui lòng thêm tệp Word (.docx) để người dùng tải về.', 'error');
+        return;
+      }
+      if (!docxFile.name.toLowerCase().endsWith('.docx')) {
+        showToast('Tệp tải về bắt buộc phải có định dạng .docx.', 'error');
+        return;
+      }
+      if (!pdfFile) {
+        showToast('Vui lòng thêm tệp PDF (.pdf) để hiển thị xem trước trên web.', 'error');
+        return;
+      }
+      if (!pdfFile.name.toLowerCase().endsWith('.pdf')) {
+        showToast('Tệp hiển thị trên web bắt buộc phải có định dạng .pdf.', 'error');
+        return;
+      }
+    }
+
+    if (!title.trim()) {
+      showToast('Tên tài liệu không được để trống.', 'error');
       return;
     }
 
     setSubmitting(true);
     setUploadProgress(5);
     try {
-      if (editingDoc) {
-        const fd = new FormData();
-        fd.append('title', title.trim());
-        fd.append('description', description.trim());
-        if (subjectId) fd.append('subjectId', subjectId);
-        if (gradeId) fd.append('gradeId', gradeId);
-        if (categoryId) fd.append('categoryId', categoryId);
-        fd.append('topic', topic.trim());
-        fd.append('author', author.trim());
-        fd.append('tags', tagsText);
-        fd.append('status', status);
-        fd.append('featured', String(featured));
-        if (selectedFiles[0]) fd.append('file', selectedFiles[0]);
-        if (thumbFile) fd.append('thumbnail', thumbFile);
+      const fd = new FormData();
+      fd.append('title', title.trim());
+      fd.append('description', description.trim());
+      if (subjectId) fd.append('subjectId', subjectId);
+      if (gradeId) fd.append('gradeId', gradeId);
+      if (categoryId) fd.append('categoryId', categoryId);
+      fd.append('topic', topic.trim());
+      fd.append('author', author.trim());
+      fd.append('tags', tagsText);
+      fd.append('status', status);
+      fd.append('featured', String(featured));
+      if (docxFile) fd.append('docxFile', docxFile);
+      if (pdfFile) fd.append('pdfFile', pdfFile);
+      if (thumbFile) fd.append('thumbnail', thumbFile);
 
-        const { ok, data } = await uploadSingleWithProgress(
-          `/api/admin/documents/${editingDoc.id}`,
-          'PUT',
-          fd,
-          setUploadProgress
-        );
-        if (!ok) throw new Error(data.error || 'Cập nhật thất bại.');
-        showToast('Đã cập nhật thông tin tài liệu thành công.', 'success');
-      } else {
-        // Support uploading 1 or multiple selected files sequentially
-        for (let i = 0; i < selectedFiles.length; i++) {
-          const file = selectedFiles[i];
-          const computedTitle =
-            selectedFiles.length === 1 && title.trim()
-              ? title.trim()
-              : selectedFiles.length > 1
-              ? `${title.trim() ? title.trim() + ' - ' : ''}${file.name.replace(/\.[^.]+$/, '')}`
-              : file.name;
-
-          const fd = new FormData();
-          fd.append('title', computedTitle);
-          fd.append('description', description.trim());
-          if (subjectId) fd.append('subjectId', subjectId);
-          if (gradeId) fd.append('gradeId', gradeId);
-          if (categoryId) fd.append('categoryId', categoryId);
-          fd.append('topic', topic.trim());
-          fd.append('author', author.trim());
-          fd.append('tags', tagsText);
-          fd.append('status', status);
-          fd.append('featured', String(featured));
-          fd.append('file', file);
-          if (thumbFile) fd.append('thumbnail', thumbFile);
-
-          const { ok, data } = await uploadSingleWithProgress(
-            '/api/admin/documents',
-            'POST',
-            fd,
-            (pct) => {
-              const overall = Math.round(((i + pct / 100) / selectedFiles.length) * 100);
-              setUploadProgress(overall);
-            }
-          );
-          if (!ok) throw new Error(data.error || `Lỗi tải tệp ${file.name}`);
-        }
-        showToast(`Đã tải lên ${selectedFiles.length} tài liệu thành công!`, 'success');
+      const { ok, data } = await uploadSingleWithProgress(
+        editingDoc ? `/api/admin/documents/${editingDoc.id}` : '/api/admin/documents',
+        editingDoc ? 'PUT' : 'POST',
+        fd,
+        setUploadProgress
+      );
+      if (!ok) {
+        throw new Error(data.error || (editingDoc ? 'Cập nhật thất bại.' : 'Tải lên thất bại.'));
       }
+      showToast(
+        editingDoc
+          ? 'Đã cập nhật thông tin tài liệu thành công.'
+          : 'Đã tải lên cặp tệp Word + PDF thành công!',
+        'success'
+      );
 
       setModalOpen(false);
       await loadDocuments();
@@ -280,15 +282,40 @@ export function AdminDocumentsTab({
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handlePickedFiles = (files: File[], target: 'docx' | 'pdf') => {
+    let pickedDocx: File | null = null;
+    let pickedPdf: File | null = null;
+
+    for (const f of files) {
+      const lower = f.name.toLowerCase();
+      if (lower.endsWith('.docx')) {
+        pickedDocx = f;
+      } else if (lower.endsWith('.pdf')) {
+        pickedPdf = f;
+      }
+    }
+
+    if (pickedDocx) setDocxFile(pickedDocx);
+    if (pickedPdf) setPdfFile(pickedPdf);
+
+    if (target === 'docx' && !pickedDocx && files[0]) {
+      showToast('Vui lòng chọn tệp đúng định dạng Word (.docx).', 'error');
+    } else if (target === 'pdf' && !pickedPdf && files[0]) {
+      showToast('Vui lòng chọn tệp đúng định dạng PDF (.pdf).', 'error');
+    }
+
+    const firstValid = pickedDocx || pickedPdf;
+    if (firstValid && !title.trim()) {
+      setTitle(firstValid.name.replace(/\.[^.]+$/, ''));
+    }
+  };
+
+  const handleDropFor = (target: 'docx' | 'pdf') => (e: React.DragEvent) => {
     e.preventDefault();
-    setDragOver(false);
+    setDragTarget(null);
     const dropped = Array.from(e.dataTransfer.files || []);
     if (dropped.length > 0) {
-      setSelectedFiles(editingDoc ? [dropped[0]] : dropped);
-      if (!title.trim() && dropped.length === 1) {
-        setTitle(dropped[0].name.replace(/\.[^.]+$/, ''));
-      }
+      handlePickedFiles(dropped, target);
     }
   };
 
@@ -511,65 +538,126 @@ export function AdminDocumentsTab({
             </div>
 
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
-              {/* Drag & Drop File Upload */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  {editingDoc
-                    ? 'Thay thế tệp tài liệu (tùy chọn, giữ nguyên đường dẫn)'
-                    : 'Tệp tài liệu (PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX) *'}
-                </label>
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-xl p-5 text-center transition-colors ${
-                    dragOver ? 'border-blue-600 bg-blue-50' : 'border-slate-300 bg-slate-50/70'
-                  }`}
-                >
-                  <UploadCloud className="w-8 h-8 text-blue-700 mx-auto mb-2" />
-                  <p className="text-sm font-medium text-slate-700">
-                    Kéo thả tệp vào đây hoặc{' '}
-                    <label className="text-blue-700 hover:underline cursor-pointer font-semibold">
-                      chọn tệp từ máy
+              {/* Dual File Upload: Word (.docx) + PDF (.pdf) */}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    {editingDoc
+                      ? 'Thay thế cặp tệp tài liệu (tùy chọn, giữ nguyên đường dẫn)'
+                      : 'Tệp tài liệu bắt buộc (1 file Word .docx để tải về + 1 file PDF .pdf để xem trên web) *'}
+                  </label>
+                  {(docxFile || pdfFile) && (
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Tổng: {formatBytes((docxFile?.size || 0) + (pdfFile?.size || 0))}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Box 1: Word (.docx) */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragTarget('docx');
+                    }}
+                    onDragLeave={() => setDragTarget(null)}
+                    onDrop={handleDropFor('docx')}
+                    className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${
+                      dragTarget === 'docx'
+                        ? 'border-blue-600 bg-blue-50'
+                        : docxFile
+                        ? 'border-emerald-400 bg-emerald-50/40'
+                        : 'border-slate-300 bg-slate-50/70'
+                    }`}
+                  >
+                    <FileText className="w-7 h-7 text-blue-700 mx-auto mb-1.5" />
+                    <p className="text-xs font-bold text-slate-800">
+                      1. File Word (.docx) {!editingDoc && <span className="text-red-600">*</span>}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 mb-2">
+                      Bản gốc người dùng sẽ tải về máy
+                    </p>
+                    <label className="inline-block px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-semibold text-blue-700 hover:bg-blue-50 cursor-pointer">
+                      {docxFile ? 'Đổi file .docx' : 'Chọn file .docx'}
                       <input
                         type="file"
-                        multiple={!editingDoc}
-                        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+                        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         className="sr-only"
                         onChange={(e) => {
                           const list = Array.from(e.target.files || []);
-                          setSelectedFiles(list);
-                          if (!title.trim() && list.length === 1) {
-                            setTitle(list[0].name.replace(/\.[^.]+$/, ''));
-                          }
+                          if (list.length > 0) handlePickedFiles(list, 'docx');
+                          e.target.value = '';
                         }}
                       />
                     </label>
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">Tối đa 25MB / tệp · Bảo toàn công thức OMML &amp; MathType</p>
-
-                  {selectedFiles.length > 0 && (
-                    <div className="mt-3 space-y-1.5 text-left">
-                      {selectedFiles.map((f, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <FileUp className="w-4 h-4 text-blue-700 shrink-0" />
-                            <span className="font-medium text-slate-800 truncate">{f.name}</span>
-                          </div>
-                          <span className="font-mono text-slate-500 shrink-0 ml-2">
-                            {formatBytes(f.size)}
-                          </span>
+                    {docxFile && (
+                      <div className="mt-2.5 flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs text-left">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <FileUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="font-medium text-slate-800 truncate">{docxFile.name}</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <span className="font-mono text-[11px] text-slate-500 shrink-0 ml-1.5">
+                          {formatBytes(docxFile.size)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Box 2: PDF (.pdf) */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragTarget('pdf');
+                    }}
+                    onDragLeave={() => setDragTarget(null)}
+                    onDrop={handleDropFor('pdf')}
+                    className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${
+                      dragTarget === 'pdf'
+                        ? 'border-rose-600 bg-rose-50'
+                        : pdfFile
+                        ? 'border-emerald-400 bg-emerald-50/40'
+                        : 'border-slate-300 bg-slate-50/70'
+                    }`}
+                  >
+                    <UploadCloud className="w-7 h-7 text-rose-600 mx-auto mb-1.5" />
+                    <p className="text-xs font-bold text-slate-800">
+                      2. File PDF (.pdf) {!editingDoc && <span className="text-red-600">*</span>}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 mb-2">
+                      Hiển thị đọc trực tiếp chuẩn công thức trên web
+                    </p>
+                    <label className="inline-block px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer">
+                      {pdfFile ? 'Đổi file .pdf' : 'Chọn file .pdf'}
+                      <input
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        className="sr-only"
+                        onChange={(e) => {
+                          const list = Array.from(e.target.files || []);
+                          if (list.length > 0) handlePickedFiles(list, 'pdf');
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                    {pdfFile && (
+                      <div className="mt-2.5 flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs text-left">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <FileUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="font-medium text-slate-800 truncate">{pdfFile.name}</span>
+                        </div>
+                        <span className="font-mono text-[11px] text-slate-500 shrink-0 ml-1.5">
+                          {formatBytes(pdfFile.size)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                {(docxFile?.size || 0) + (pdfFile?.size || 0) > 4.2 * 1024 * 1024 && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                    Lưu ý: Tổng dung lượng 2 tệp đang vượt ~4.2MB. Nếu tải lên qua Vercel có thể bị từ chối ở mức 4.5MB — hãy xuất PDF tối ưu dung lượng nếu gặp lỗi.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -580,7 +668,7 @@ export function AdminDocumentsTab({
                   <input
                     id="doc-title"
                     type="text"
-                    required={selectedFiles.length <= 1}
+                    required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="VD: Đề thi học kỳ 1 môn Toán lớp 12..."

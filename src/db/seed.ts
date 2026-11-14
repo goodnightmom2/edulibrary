@@ -14,6 +14,7 @@ import {
 } from './schema.ts';
 import { toVietnameseSlug } from '../lib/slug.ts';
 import { ensureStorageDirs, resolveSafeStoragePath, DOCUMENTS_DIR } from '../lib/storage.ts';
+import { ensureDocumentFilesTable } from '../lib/documentFiles.ts';
 import { generateDocumentPreview } from '../lib/docProcessor.ts';
 import {
   createSampleDocxWithOmml,
@@ -85,6 +86,7 @@ export async function ensureSeeded(): Promise<void> {
 
 export async function seedDatabase(): Promise<void> {
   await ensureStorageDirs();
+  await ensureDocumentFilesTable();
 
   // 1. Subjects
   for (let i = 0; i < DEFAULT_SUBJECTS.length; i++) {

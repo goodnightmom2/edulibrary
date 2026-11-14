@@ -191,3 +191,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at);
+
+CREATE TABLE IF NOT EXISTS document_files (
+  id SERIAL PRIMARY KEY,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  content_bytes BYTEA NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE(document_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_document_files_role_filename ON document_files (role, filename);

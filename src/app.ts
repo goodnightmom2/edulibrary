@@ -5,6 +5,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { db } from './db/index.ts';
 import { documents, processingJobs, subjects } from './db/schema.ts';
 import { ensureSeeded } from './db/seed.ts';
+import { getDocumentThumbnailByFilename } from './lib/documentFiles.ts';
 import { getStorageStatus, resolveSafeStoragePath, THUMBNAILS_DIR } from './lib/storage.ts';
 import { validateCsrfOrigin, workerCallbackSchema } from './middleware/security.ts';
 import { adminApiRouter } from './routes/adminApi.ts';
@@ -166,12 +167,22 @@ export function createServerApp() {
 
   // Safe thumbnail serving
   app.get('/api/uploads/thumbnails/:filename', async (req: Request, res: Response) => {
+    const filename = String(req.params.filename || '');
     try {
-      const safePath = resolveSafeStoragePath(THUMBNAILS_DIR, String(req.params.filename || ''));
+      const safePath = resolveSafeStoragePath(THUMBNAILS_DIR, filename);
       await fs.access(safePath);
-      res.sendFile(safePath);
+      return res.sendFile(safePath);
     } catch {
-      res.status(404).end();
+      try {
+        const storedThumb = await getDocumentThumbnailByFilename(filename);
+        if (storedThumb) {
+          res.setHeader('Content-Type', storedThumb.mimeType);
+          return res.send(storedThumb.buffer);
+        }
+      } catch {
+        // ignore DB fallback error
+      }
+      return res.status(404).end();
     }
   });
 

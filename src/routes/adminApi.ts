@@ -12,6 +12,7 @@ import {
   documentTags,
   downloadLogs,
   grades,
+  processingJobs,
   siteSettings,
   subjects,
   tags,
@@ -20,6 +21,7 @@ import {
 } from '../db/schema.ts';
 import { listDocuments } from '../db/documents.ts';
 import { toSafeUser } from '../db/users.ts';
+import { saveDocumentFile } from '../lib/documentFiles.ts';
 import { enqueueDocumentProcessing, getRecentProcessingJobs } from '../lib/processingQueue.ts';
 import { getAllowedFileExtension, toVietnameseSlug } from '../lib/slug.ts';
 import {
@@ -335,35 +337,66 @@ adminApiRouter.get('/documents', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Upload new document -> Storage -> Create DB Record (PENDING) -> Enqueue Async Worker
+const PAIRED_PDF_MATH_META = {
+  ommlCount: 0,
+  mathTypeOleCount: 0,
+  formulaImageCount: 0,
+  convertedCount: 0,
+  fallbackImagesCount: 0,
+  preCheckTotal: 0,
+  postCheckPreserved: 0,
+  supportsFullPreview: true,
+  warnings: [] as string[],
+};
+
+const PAIRED_PDF_PREVIEW_JSON = JSON.stringify({
+  kind: 'pdf',
+  mathMeta: PAIRED_PDF_MATH_META,
+});
+
+// Upload paired Word (.docx for download) + PDF (.pdf for online viewing) -> Storage & DB -> Immediately COMPLETED
 adminApiRouter.post(
   '/documents',
   uploadRateLimiter,
   upload.fields([
-    { name: 'file', maxCount: 1 },
+    { name: 'docxFile', maxCount: 1 },
+    { name: 'pdfFile', maxCount: 1 },
     { name: 'thumbnail', maxCount: 1 },
   ]),
   async (req: AuthRequest, res: Response) => {
     try {
       await ensureStorageDirs();
       const files = req.files as Record<string, Express.Multer.File[]> | undefined;
-      const docFile = files?.file?.[0];
+      const docxFile = files?.docxFile?.[0];
+      const pdfFile = files?.pdfFile?.[0];
       const thumbFile = files?.thumbnail?.[0];
 
-      if (!docFile) {
-        return res.status(400).json({ error: 'Vui lòng chọn tệp tài liệu để tải lên.' });
+      if (!docxFile) {
+        return res.status(400).json({ error: 'Vui lòng thêm tệp Word (.docx) để người dùng tải về.' });
+      }
+      if (!pdfFile) {
+        return res.status(400).json({ error: 'Vui lòng thêm tệp PDF (.pdf) để hiển thị trực tiếp trên web.' });
       }
 
-      const ext = getAllowedFileExtension(docFile.originalname);
-      if (!ext) {
+      if (getAllowedFileExtension(docxFile.originalname) !== 'docx') {
         return res.status(400).json({
-          error: 'Định dạng không hỗ trợ. Chỉ chấp nhận PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX.',
+          error: 'Tệp tải về bắt buộc phải có định dạng Word (.docx).',
+        });
+      }
+      if (!validateMagicBytes(docxFile.buffer, 'docx')) {
+        return res.status(400).json({
+          error: 'Nội dung tệp .docx không hợp lệ (kiểm tra bảo mật thất bại).',
         });
       }
 
-      if (!validateMagicBytes(docFile.buffer, ext)) {
+      if (getAllowedFileExtension(pdfFile.originalname) !== 'pdf') {
         return res.status(400).json({
-          error: 'Nội dung tệp không khớp với định dạng mở rộng (kiểm tra bảo mật thất bại).',
+          error: 'Tệp hiển thị trên web bắt buộc phải có định dạng PDF (.pdf).',
+        });
+      }
+      if (!validateMagicBytes(pdfFile.buffer, 'pdf')) {
+        return res.status(400).json({
+          error: 'Nội dung tệp .pdf không hợp lệ (kiểm tra bảo mật thất bại).',
         });
       }
 
@@ -372,24 +405,34 @@ adminApiRouter.post(
         return res.status(400).json({ error: 'Tên tài liệu không được để trống.' });
       }
 
-      const storedFilename = generateStoredFilename(docFile.originalname);
-      const mimeType = detectMimeTypeFromExt(ext);
+      const docxStoredFilename = generateStoredFilename(docxFile.originalname);
+      const docxMime = detectMimeTypeFromExt('docx');
       const storedOriginal = await uploadStoredObject(
         'originals',
-        storedFilename,
-        docFile.buffer,
-        mimeType
+        docxStoredFilename,
+        docxFile.buffer,
+        docxMime
+      );
+
+      const pdfStoredFilename = generateStoredFilename(pdfFile.originalname);
+      const storedPreviewPdf = await uploadStoredObject(
+        'previews',
+        pdfStoredFilename,
+        pdfFile.buffer,
+        'application/pdf'
       );
 
       let thumbnailUrl: string | null = null;
+      let thumbStoredName: string | null = null;
+      let thumbMimeType: string | null = null;
       if (thumbFile) {
         const thumbExt = path.extname(thumbFile.originalname).toLowerCase();
         if (['.jpg', '.jpeg', '.png', '.webp'].includes(thumbExt)) {
-          const thumbStored = generateStoredFilename(thumbFile.originalname);
-          const thumbMime =
+          thumbStoredName = generateStoredFilename(thumbFile.originalname);
+          thumbMimeType =
             thumbExt === '.png' ? 'image/png' : thumbExt === '.webp' ? 'image/webp' : 'image/jpeg';
-          await uploadStoredObject('thumbnails', thumbStored, thumbFile.buffer, thumbMime);
-          thumbnailUrl = `/api/uploads/thumbnails/${thumbStored}`;
+          await uploadStoredObject('thumbnails', thumbStoredName, thumbFile.buffer, thumbMimeType);
+          thumbnailUrl = `/api/uploads/thumbnails/${thumbStoredName}`;
         }
       }
 
@@ -415,15 +458,16 @@ adminApiRouter.post(
           title,
           slug: finalSlug,
           description: typeof req.body.description === 'string' ? stripUnsafeHtml(req.body.description) : '',
-          originalFilename: docFile.originalname,
-          storedFilename,
-          fileType: ext,
-          mimeType,
-          fileSize: docFile.size,
-          filePath: storedFilename,
-          previewPath: null,
+          originalFilename: docxFile.originalname,
+          storedFilename: docxStoredFilename,
+          fileType: 'docx',
+          mimeType: docxMime,
+          fileSize: docxFile.size,
+          filePath: docxStoredFilename,
+          previewPath: PAIRED_PDF_PREVIEW_JSON,
           storageProvider: storedOriginal.provider,
           storageKey: storedOriginal.storageKey,
+          previewStorageKey: storedPreviewPdf.storageKey,
           thumbnail: thumbnailUrl,
           subjectId: subjectId && Number.isInteger(subjectId) ? subjectId : null,
           gradeId: gradeId && Number.isInteger(gradeId) ? gradeId : null,
@@ -434,12 +478,40 @@ adminApiRouter.post(
               ? stripUnsafeHtml(req.body.author)
               : req.dbUser!.fullName,
           status,
-          processingStatus: 'PENDING',
+          processingStatus: 'COMPLETED',
+          processingError: null,
           featured,
-          mathMeta: null,
+          mathMeta: JSON.stringify(PAIRED_PDF_MATH_META),
           createdBy: req.dbUser!.id,
         })
         .returning();
+
+      // Persist both binaries in PostgreSQL so Vercel serverless instances always serve them reliably
+      await Promise.all([
+        saveDocumentFile({
+          documentId: inserted.id,
+          role: 'ORIGINAL',
+          filename: docxFile.originalname,
+          mimeType: docxMime,
+          buffer: docxFile.buffer,
+        }),
+        saveDocumentFile({
+          documentId: inserted.id,
+          role: 'PREVIEW_PDF',
+          filename: pdfFile.originalname,
+          mimeType: 'application/pdf',
+          buffer: pdfFile.buffer,
+        }),
+        thumbFile && thumbStoredName && thumbMimeType
+          ? saveDocumentFile({
+              documentId: inserted.id,
+              role: 'THUMBNAIL',
+              filename: thumbStoredName,
+              mimeType: thumbMimeType,
+              buffer: thumbFile.buffer,
+            })
+          : Promise.resolve(),
+      ]);
 
       // Handle comma-separated tags
       if (typeof req.body.tags === 'string' && req.body.tags.trim()) {
@@ -461,8 +533,20 @@ adminApiRouter.post(
         }
       }
 
-      // Enqueue background worker (non-blocking); document remains hidden publicly until COMPLETED
-      const job = await enqueueDocumentProcessing(inserted.id, 'DOCUMENT_CONVERT');
+      const [job] = await db
+        .insert(processingJobs)
+        .values({
+          documentId: inserted.id,
+          jobType: 'PAIRED_PDF_PREVIEW',
+          status: 'COMPLETED',
+          attempts: 1,
+          maxAttempts: 1,
+          workerId: 'paired-pdf-upload',
+          mathReport: JSON.stringify(PAIRED_PDF_MATH_META),
+          startedAt: new Date(),
+          completedAt: new Date(),
+        })
+        .returning();
 
       await logAudit(req.dbUser!.id, 'CREATE_DOCUMENT', 'document', inserted.id, title);
 
@@ -477,10 +561,12 @@ adminApiRouter.post(
   }
 );
 
-// Update document metadata or replace file while keeping link
+// Update document metadata or replace Word/PDF files independently while keeping link
 adminApiRouter.put(
   '/documents/:id',
   upload.fields([
+    { name: 'docxFile', maxCount: 1 },
+    { name: 'pdfFile', maxCount: 1 },
     { name: 'file', maxCount: 1 },
     { name: 'thumbnail', maxCount: 1 },
   ]),
@@ -498,7 +584,8 @@ adminApiRouter.put(
       const existing = existingRows[0];
 
       const files = req.files as Record<string, Express.Multer.File[]> | undefined;
-      const docFile = files?.file?.[0];
+      const docxFile = files?.docxFile?.[0] || files?.file?.[0];
+      const pdfFile = files?.pdfFile?.[0];
       const thumbFile = files?.thumbnail?.[0];
 
       const updates: Partial<typeof documents.$inferInsert> = {
@@ -527,7 +614,12 @@ adminApiRouter.put(
         updates.categoryId = req.body.categoryId ? Number(req.body.categoryId) : null;
       }
       if (req.body.status === 'PUBLISHED' || req.body.status === 'DRAFT' || req.body.status === 'TRASH') {
-        if (req.body.status === 'PUBLISHED' && !docFile && existing.processingStatus !== 'COMPLETED') {
+        if (
+          req.body.status === 'PUBLISHED' &&
+          !docxFile &&
+          !pdfFile &&
+          existing.processingStatus !== 'COMPLETED'
+        ) {
           return res.status(409).json({
             error:
               'Không thể xuất bản công khai khi tài liệu chưa hoàn tất kiểm tra và xử lý (COMPLETED). Vui lòng thử xử lý lại trước.',
@@ -545,31 +637,78 @@ adminApiRouter.put(
       }
 
       let shouldRequeue = false;
-      if (docFile) {
-        const ext = getAllowedFileExtension(docFile.originalname);
-        if (!ext || !validateMagicBytes(docFile.buffer, ext)) {
-          return res.status(400).json({ error: 'Tệp thay thế không hợp lệ hoặc không được hỗ trợ.' });
+      if (docxFile) {
+        const ext = getAllowedFileExtension(docxFile.originalname);
+        if (!ext || !validateMagicBytes(docxFile.buffer, ext)) {
+          return res.status(400).json({ error: 'Tệp Word (.docx) thay thế không hợp lệ hoặc không được hỗ trợ.' });
         }
-        const storedFilename = generateStoredFilename(docFile.originalname);
+        if (files?.docxFile?.[0] && ext !== 'docx') {
+          return res.status(400).json({ error: 'Tệp tải về bắt buộc phải có định dạng Word (.docx).' });
+        }
+        const storedFilename = generateStoredFilename(docxFile.originalname);
         const mimeType = detectMimeTypeFromExt(ext);
-        const stored = await uploadStoredObject('originals', storedFilename, docFile.buffer, mimeType);
+        const stored = await uploadStoredObject('originals', storedFilename, docxFile.buffer, mimeType);
 
-        // Clean up old file if replaced
         if (existing.filePath) {
           await deleteStoredObject('originals', existing.storageKey || existing.filePath);
         }
 
-        updates.originalFilename = docFile.originalname;
+        await saveDocumentFile({
+          documentId: id,
+          role: 'ORIGINAL',
+          filename: docxFile.originalname,
+          mimeType,
+          buffer: docxFile.buffer,
+        });
+
+        updates.originalFilename = docxFile.originalname;
         updates.storedFilename = storedFilename;
         updates.fileType = ext;
         updates.mimeType = mimeType;
-        updates.fileSize = docFile.size;
+        updates.fileSize = docxFile.size;
         updates.filePath = storedFilename;
         updates.storageProvider = stored.provider;
         updates.storageKey = stored.storageKey;
-        updates.processingStatus = 'PENDING';
+
+        // Only requeue legacy conversion if there's no paired PDF (neither new nor existing)
+        if (!pdfFile && !existing.previewStorageKey) {
+          updates.processingStatus = 'PENDING';
+          updates.processingError = null;
+          shouldRequeue = true;
+        }
+      }
+
+      if (pdfFile) {
+        if (
+          getAllowedFileExtension(pdfFile.originalname) !== 'pdf' ||
+          !validateMagicBytes(pdfFile.buffer, 'pdf')
+        ) {
+          return res.status(400).json({ error: 'Tệp PDF hiển thị thay thế không hợp lệ.' });
+        }
+        const pdfStoredFilename = generateStoredFilename(pdfFile.originalname);
+        const storedPreview = await uploadStoredObject(
+          'previews',
+          pdfStoredFilename,
+          pdfFile.buffer,
+          'application/pdf'
+        );
+        if (existing.previewStorageKey) {
+          await deleteStoredObject('previews', existing.previewStorageKey);
+        }
+
+        await saveDocumentFile({
+          documentId: id,
+          role: 'PREVIEW_PDF',
+          filename: pdfFile.originalname,
+          mimeType: 'application/pdf',
+          buffer: pdfFile.buffer,
+        });
+
+        updates.previewStorageKey = storedPreview.storageKey;
+        updates.previewPath = PAIRED_PDF_PREVIEW_JSON;
+        updates.processingStatus = 'COMPLETED';
         updates.processingError = null;
-        shouldRequeue = true;
+        updates.mathMeta = JSON.stringify(PAIRED_PDF_MATH_META);
       }
 
       if (thumbFile) {
@@ -579,6 +718,13 @@ adminApiRouter.put(
           const thumbMime =
             thumbExt === '.png' ? 'image/png' : thumbExt === '.webp' ? 'image/webp' : 'image/jpeg';
           await uploadStoredObject('thumbnails', thumbStored, thumbFile.buffer, thumbMime);
+          await saveDocumentFile({
+            documentId: id,
+            role: 'THUMBNAIL',
+            filename: thumbStored,
+            mimeType: thumbMime,
+            buffer: thumbFile.buffer,
+          });
           updates.thumbnail = `/api/uploads/thumbnails/${thumbStored}`;
         }
       }
