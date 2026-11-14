@@ -51,3 +51,57 @@ export function getAllowedFileExtension(filename: string): string | null {
   const allowed = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
   return allowed.includes(ext) ? ext : null;
 }
+
+export function decodeMulterFilename(rawName: string): string {
+  if (!rawName) return 'document';
+  if (/[\u0080-\u00ff]/.test(rawName) && !/[^\u0000-\u00ff]/.test(rawName)) {
+    try {
+      const decoded = Buffer.from(rawName, 'latin1').toString('utf8');
+      if (!decoded.includes('\ufffd')) {
+        return decoded;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return rawName;
+}
+
+export function buildDocumentDownloadFilename(
+  docTitle: string | null | undefined,
+  fallbackFilename: string,
+  ext: string
+): string {
+  const cleanExt = ext.replace(/^\.+/, '').toLowerCase() || 'docx';
+  const rawBase =
+    (docTitle || '').trim() ||
+    decodeMulterFilename(fallbackFilename).replace(/\.[^.]+$/, '') ||
+    'tai-lieu';
+
+  const extSuffixRegex = new RegExp(`\\.${cleanExt}$`, 'i');
+  const sanitizedBase = rawBase
+    .replace(extSuffixRegex, '')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    .slice(0, 140)
+    .trim();
+
+  const finalBase = sanitizedBase || 'tai-lieu';
+  return `${finalBase}.${cleanExt}`;
+}
+
+export function buildContentDispositionHeader(
+  disposition: 'inline' | 'attachment',
+  utf8Filename: string
+): string {
+  const dotIdx = utf8Filename.lastIndexOf('.');
+  const base = dotIdx > 0 ? utf8Filename.slice(0, dotIdx) : utf8Filename;
+  const ext = dotIdx > 0 ? utf8Filename.slice(dotIdx).toLowerCase().replace(/[^.a-z0-9]/g, '') : '';
+  const asciiFallback = `${toVietnameseSlug(base) || 'document'}${ext}`;
+  const rfc5987 = encodeURIComponent(utf8Filename).replace(
+    /[!'()*]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${rfc5987}`;
+}

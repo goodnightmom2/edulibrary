@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { findUserByEmail, toSafeUser } from '../db/users.ts';
 import { generateDocumentPreview, type DocumentPreviewPayload } from '../lib/docProcessor.ts';
 import { getDocumentFile } from '../lib/documentFiles.ts';
+import { buildContentDispositionHeader, buildDocumentDownloadFilename } from '../lib/slug.ts';
 import {
   createPresignedDownloadUrl,
   DOCUMENTS_DIR,
@@ -218,13 +219,9 @@ publicApiRouter.get('/documents/:slug/file', optionalAuth, async (req: AuthReque
 
     // Serve paired PDF preview when viewing online (?mode=preview or previewStorageKey exists)
     if (wantPreviewPdf && (doc.previewStorageKey || req.query.mode === 'preview')) {
-      const pdfDisplayName = `${doc.originalFilename.replace(/\.[^.]+$/, '') || doc.slug}.pdf`;
-      const encodedPdfName = encodeURIComponent(pdfDisplayName);
+      const pdfDisplayName = buildDocumentDownloadFilename(doc.title, doc.originalFilename, 'pdf');
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader(
-        'Content-Disposition',
-        `inline; filename="${encodedPdfName}"; filename*=UTF-8''${encodedPdfName}`
-      );
+      res.setHeader('Content-Disposition', buildContentDispositionHeader('inline', pdfDisplayName));
       res.setHeader('X-Content-Type-Options', 'nosniff');
 
       if (doc.previewStorageKey) {
@@ -258,19 +255,24 @@ publicApiRouter.get('/documents/:slug/file', optionalAuth, async (req: AuthReque
       void recordDocumentDownload(doc.id, req.dbUser?.id);
     }
 
+    const downloadFilename = buildDocumentDownloadFilename(
+      doc.title,
+      doc.originalFilename,
+      doc.fileType || 'docx'
+    );
+
     // If stored in Cloudflare R2 and downloading as attachment, redirect to short-lived Presigned URL
     if (isDownload && isR2Configured() && doc.storageProvider === 'R2' && doc.storageKey) {
-      const signedUrl = await createPresignedDownloadUrl(doc.storageKey, doc.originalFilename, 300);
+      const signedUrl = await createPresignedDownloadUrl(doc.storageKey, downloadFilename, 300);
       if (signedUrl) {
         return res.redirect(302, signedUrl);
       }
     }
 
-    const encodedName = encodeURIComponent(doc.originalFilename);
     res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
     res.setHeader(
       'Content-Disposition',
-      `${isDownload ? 'attachment' : 'inline'}; filename="${encodedName}"; filename*=UTF-8''${encodedName}`
+      buildContentDispositionHeader(isDownload ? 'attachment' : 'inline', downloadFilename)
     );
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
@@ -315,7 +317,12 @@ publicApiRouter.get('/documents/:slug/download-url', optionalAuth, async (req: A
     }
 
     if (doc.storageProvider === 'R2' && doc.storageKey) {
-      const presigned = await createPresignedDownloadUrl(doc.storageKey, doc.originalFilename, 300);
+      const downloadFilename = buildDocumentDownloadFilename(
+        doc.title,
+        doc.originalFilename,
+        doc.fileType || 'docx'
+      );
+      const presigned = await createPresignedDownloadUrl(doc.storageKey, downloadFilename, 300);
       if (presigned) {
         return res.json({ url: presigned, provider: 'R2', expiresInSeconds: 300 });
       }

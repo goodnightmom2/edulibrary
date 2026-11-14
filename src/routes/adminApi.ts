@@ -23,7 +23,7 @@ import { listDocuments } from '../db/documents.ts';
 import { toSafeUser } from '../db/users.ts';
 import { saveDocumentFile } from '../lib/documentFiles.ts';
 import { enqueueDocumentProcessing, getRecentProcessingJobs } from '../lib/processingQueue.ts';
-import { getAllowedFileExtension, toVietnameseSlug } from '../lib/slug.ts';
+import { decodeMulterFilename, getAllowedFileExtension, toVietnameseSlug } from '../lib/slug.ts';
 import {
   createPresignedUploadUrl,
   deleteStoredObject,
@@ -405,7 +405,10 @@ adminApiRouter.post(
         return res.status(400).json({ error: 'Tên tài liệu không được để trống.' });
       }
 
-      const docxStoredFilename = generateStoredFilename(docxFile.originalname);
+      const docxOriginalName = decodeMulterFilename(docxFile.originalname);
+      const pdfOriginalName = decodeMulterFilename(pdfFile.originalname);
+
+      const docxStoredFilename = generateStoredFilename(docxOriginalName);
       const docxMime = detectMimeTypeFromExt('docx');
       const storedOriginal = await uploadStoredObject(
         'originals',
@@ -414,7 +417,7 @@ adminApiRouter.post(
         docxMime
       );
 
-      const pdfStoredFilename = generateStoredFilename(pdfFile.originalname);
+      const pdfStoredFilename = generateStoredFilename(pdfOriginalName);
       const storedPreviewPdf = await uploadStoredObject(
         'previews',
         pdfStoredFilename,
@@ -458,7 +461,7 @@ adminApiRouter.post(
           title,
           slug: finalSlug,
           description: typeof req.body.description === 'string' ? stripUnsafeHtml(req.body.description) : '',
-          originalFilename: docxFile.originalname,
+          originalFilename: docxOriginalName,
           storedFilename: docxStoredFilename,
           fileType: 'docx',
           mimeType: docxMime,
@@ -491,14 +494,14 @@ adminApiRouter.post(
         saveDocumentFile({
           documentId: inserted.id,
           role: 'ORIGINAL',
-          filename: docxFile.originalname,
+          filename: docxOriginalName,
           mimeType: docxMime,
           buffer: docxFile.buffer,
         }),
         saveDocumentFile({
           documentId: inserted.id,
           role: 'PREVIEW_PDF',
-          filename: pdfFile.originalname,
+          filename: pdfOriginalName,
           mimeType: 'application/pdf',
           buffer: pdfFile.buffer,
         }),
@@ -645,7 +648,8 @@ adminApiRouter.put(
         if (files?.docxFile?.[0] && ext !== 'docx') {
           return res.status(400).json({ error: 'Tệp tải về bắt buộc phải có định dạng Word (.docx).' });
         }
-        const storedFilename = generateStoredFilename(docxFile.originalname);
+        const docxOriginalName = decodeMulterFilename(docxFile.originalname);
+        const storedFilename = generateStoredFilename(docxOriginalName);
         const mimeType = detectMimeTypeFromExt(ext);
         const stored = await uploadStoredObject('originals', storedFilename, docxFile.buffer, mimeType);
 
@@ -656,12 +660,12 @@ adminApiRouter.put(
         await saveDocumentFile({
           documentId: id,
           role: 'ORIGINAL',
-          filename: docxFile.originalname,
+          filename: docxOriginalName,
           mimeType,
           buffer: docxFile.buffer,
         });
 
-        updates.originalFilename = docxFile.originalname;
+        updates.originalFilename = docxOriginalName;
         updates.storedFilename = storedFilename;
         updates.fileType = ext;
         updates.mimeType = mimeType;
@@ -685,7 +689,8 @@ adminApiRouter.put(
         ) {
           return res.status(400).json({ error: 'Tệp PDF hiển thị thay thế không hợp lệ.' });
         }
-        const pdfStoredFilename = generateStoredFilename(pdfFile.originalname);
+        const pdfOriginalName = decodeMulterFilename(pdfFile.originalname);
+        const pdfStoredFilename = generateStoredFilename(pdfOriginalName);
         const storedPreview = await uploadStoredObject(
           'previews',
           pdfStoredFilename,
@@ -699,7 +704,7 @@ adminApiRouter.put(
         await saveDocumentFile({
           documentId: id,
           role: 'PREVIEW_PDF',
-          filename: pdfFile.originalname,
+          filename: pdfOriginalName,
           mimeType: 'application/pdf',
           buffer: pdfFile.buffer,
         });
