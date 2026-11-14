@@ -4,7 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { db } from '../db/index.ts';
 import { sessions } from '../db/schema.ts';
-import { adminAuth } from '../lib/firebase-admin.ts';
+import { getAdminAuth } from '../lib/firebase-admin.ts';
 import { findUserById, toSafeUser, upsertGoogleUser, type SafeUser } from '../db/users.ts';
 
 export const ADMIN_COOKIE_NAME = 'edulib_session';
@@ -73,6 +73,7 @@ async function resolveUserFromRequest(req: AuthRequest): Promise<SafeUser | null
       }
 
       try {
+        const adminAuth = await getAdminAuth();
         const decoded = await adminAuth.verifyIdToken(token);
         if (decoded.email) {
           const user = await upsertGoogleUser({

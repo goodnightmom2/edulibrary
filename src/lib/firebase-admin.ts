@@ -1,11 +1,14 @@
-import { initializeApp, getApps } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-if (!getApps().length) {
-  initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
-}
+export async function getAdminAuth() {
+  const { initializeApp, getApps } = await import('firebase-admin/app');
+  const { getAuth } = await import('firebase-admin/auth');
 
-export const adminAuth = getAuth();
+  if (!getApps().length) {
+    initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  }
+
+  return getAuth();
+}

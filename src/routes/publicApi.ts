@@ -26,7 +26,7 @@ import {
   recordDocumentView,
 } from '../db/documents.ts';
 import { findUserByEmail, toSafeUser, upsertGoogleUser } from '../db/users.ts';
-import { adminAuth } from '../lib/firebase-admin.ts';
+import { getAdminAuth } from '../lib/firebase-admin.ts';
 import { generateDocumentPreview, type DocumentPreviewPayload } from '../lib/docProcessor.ts';
 import {
   createPresignedDownloadUrl,
@@ -292,6 +292,7 @@ publicApiRouter.post('/auth/google', authRateLimiter, async (req, res: Response)
       return res.status(401).json({ error: 'Thiếu mã xác thực Google.' });
     }
 
+    const adminAuth = await getAdminAuth();
     const decoded = await adminAuth.verifyIdToken(token);
     if (!decoded.email) {
       return res.status(400).json({ error: 'Tài khoản Google không có email hợp lệ.' });
