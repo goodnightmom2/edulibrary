@@ -1,12 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
-import { auth, googleAuthProvider } from '../lib/firebase.ts';
 import type { UserProfile } from '../types/library.ts';
 
 interface AuthContextValue {
   user: UserProfile | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<UserProfile>;
+  signIn: (email: string, password: string) => Promise<UserProfile>;
+  register: (fullName: string, email: string, password: string) => Promise<UserProfile>;
   signInAsAdmin: (email: string, password: string) => Promise<UserProfile>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -18,36 +17,19 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const firebaseUserRef = useRef<FirebaseUser | null>(null);
-  const adminTokenRef = useRef<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
 
-  const getBearerToken = useCallback(async (): Promise<string | null> => {
-    if (adminTokenRef.current) return adminTokenRef.current;
-    if (firebaseUserRef.current) {
-      try {
-        return await firebaseUserRef.current.getIdToken();
-      } catch {
-        return null;
-      }
+  const apiFetch = useCallback(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    if (tokenRef.current && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${tokenRef.current}`);
     }
-    return null;
+    return fetch(input, {
+      ...init,
+      headers,
+      credentials: 'include',
+    });
   }, []);
-
-  const apiFetch = useCallback(
-    async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const token = await getBearerToken();
-      const headers = new Headers(init.headers);
-      if (token && !headers.has('Authorization')) {
-        headers.set('Authorization', `Bearer ${token}`);
-      }
-      return fetch(input, {
-        ...init,
-        headers,
-        credentials: 'include',
-      });
-    },
-    [getBearerToken]
-  );
 
   const refreshProfile = useCallback(async () => {
     try {
@@ -66,53 +48,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [apiFetch]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      firebaseUserRef.current = fbUser;
-      if (fbUser) {
-        try {
-          const idToken = await fbUser.getIdToken();
-          const res = await fetch('/api/auth/google', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${idToken}`,
-            },
-            credentials: 'include',
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setUser(data.user);
-            setLoading(false);
-            return;
-          }
-        } catch (err) {
-          console.error('Google sync error:', err);
-        }
-      }
-      await refreshProfile();
-    });
-    return () => unsubscribe();
+    refreshProfile();
   }, [refreshProfile]);
 
-  const signInWithGoogle = useCallback(async (): Promise<UserProfile> => {
-    const result = await signInWithPopup(auth, googleAuthProvider);
-    firebaseUserRef.current = result.user;
-    const idToken = await result.user.getIdToken();
-    const res = await fetch('/api/auth/google', {
+  const signIn = useCallback(async (email: string, password: string): Promise<UserProfile> => {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Đăng nhập Google thất bại.');
+      throw new Error(data.error || 'Đăng nhập thất bại.');
     }
+    tokenRef.current = data.token || null;
     setUser(data.user);
     return data.user;
   }, []);
+
+  const register = useCallback(
+    async (fullName: string, email: string, password: string): Promise<UserProfile> => {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ fullName, email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Đăng ký tài khoản thất bại.');
+      }
+      tokenRef.current = data.token || null;
+      setUser(data.user);
+      return data.user;
+    },
+    []
+  );
 
   const signInAsAdmin = useCallback(async (email: string, password: string): Promise<UserProfile> => {
     const res = await fetch('/api/auth/admin/login', {
@@ -125,21 +97,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!res.ok) {
       throw new Error(data.error || 'Đăng nhập quản trị thất bại.');
     }
-    adminTokenRef.current = data.token || null;
+    tokenRef.current = data.token || null;
     setUser(data.user);
     return data.user;
   }, []);
 
   const logout = useCallback(async () => {
-    adminTokenRef.current = null;
+    tokenRef.current = null;
     try {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     } catch {
       // ignore
-    }
-    if (firebaseUserRef.current) {
-      await signOut(auth);
-      firebaseUserRef.current = null;
     }
     setUser(null);
   }, []);
@@ -149,7 +117,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         loading,
-        signInWithGoogle,
+        signIn,
+        register,
         signInAsAdmin,
         logout,
         refreshProfile,

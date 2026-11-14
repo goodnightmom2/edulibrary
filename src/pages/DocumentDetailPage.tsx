@@ -27,7 +27,7 @@ interface DocumentDetailPageProps {
 }
 
 export function DocumentDetailPage({ slug, onNavigate }: DocumentDetailPageProps) {
-  const { user, apiFetch, signInWithGoogle } = useAuth();
+  const { user, apiFetch } = useAuth();
   const { showToast } = useToast();
 
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
@@ -97,13 +97,9 @@ export function DocumentDetailPage({ slug, onNavigate }: DocumentDetailPageProps
   const handleToggleFavorite = async () => {
     if (!detail) return;
     if (!user) {
-      try {
-        await signInWithGoogle();
-        showToast('Đăng nhập thành công. Bạn có thể lưu tài liệu yêu thích!', 'success');
-      } catch {
-        showToast('Vui lòng đăng nhập để lưu tài liệu yêu thích.', 'info');
-        return;
-      }
+      showToast('Vui lòng đăng nhập để lưu tài liệu yêu thích.', 'info');
+      onNavigate('/tai-khoan');
+      return;
     }
     try {
       const res = await apiFetch(`/api/documents/${detail.document.id}/favorite`, {
@@ -406,14 +402,14 @@ export function DocumentDetailPage({ slug, onNavigate }: DocumentDetailPageProps
             ) : (
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm">
                 <span className="text-slate-600">
-                  Đăng nhập bằng Google để đặt câu hỏi hoặc trao đổi về tài liệu này.
+                  Đăng nhập tài khoản để đặt câu hỏi hoặc trao đổi về tài liệu này.
                 </span>
                 <button
                   type="button"
-                  onClick={() => signInWithGoogle().catch(() => {})}
+                  onClick={() => onNavigate('/tai-khoan')}
                   className="px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-semibold hover:bg-blue-800 whitespace-nowrap"
                 >
-                  Đăng nhập Google
+                  Đăng nhập / Đăng ký
                 </button>
               </div>
             )}

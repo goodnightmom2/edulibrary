@@ -4,8 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { db } from '../db/index.ts';
 import { sessions } from '../db/schema.ts';
-import { getAdminAuth } from '../lib/firebase-admin.ts';
-import { findUserById, toSafeUser, upsertGoogleUser, type SafeUser } from '../db/users.ts';
+import { findUserById, toSafeUser, type SafeUser } from '../db/users.ts';
 
 export const ADMIN_COOKIE_NAME = 'edulib_session';
 
@@ -60,7 +59,7 @@ export interface AuthRequest extends Request {
 }
 
 async function resolveUserFromRequest(req: AuthRequest): Promise<SafeUser | null> {
-  // 1. Check Bearer token (either Firebase ID Token or Admin JWT)
+  // 1. Check Bearer JWT token
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice('Bearer '.length).trim();
@@ -70,22 +69,6 @@ async function resolveUserFromRequest(req: AuthRequest): Promise<SafeUser | null
         req.sessionJti = adminPayload.jti;
         const row = await findUserById(adminPayload.userId);
         if (row) return toSafeUser(row);
-      }
-
-      try {
-        const adminAuth = await getAdminAuth();
-        const decoded = await adminAuth.verifyIdToken(token);
-        if (decoded.email) {
-          const user = await upsertGoogleUser({
-            uid: decoded.uid,
-            email: decoded.email.toLowerCase(),
-            fullName: decoded.name || decoded.email.split('@')[0],
-            avatar: decoded.picture || null,
-          });
-          return user;
-        }
-      } catch {
-        // Invalid Firebase token; fall through to cookie check
       }
     }
   }

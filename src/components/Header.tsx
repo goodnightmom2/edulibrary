@@ -21,27 +21,13 @@ export function Header({
   onNavigate,
   onSearchSubmit,
 }: HeaderProps) {
-  const { user, signInWithGoogle, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { showToast } = useToast();
 
   const [searchText, setSearchText] = useState('');
   const [subjectsOpen, setSubjectsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [signingIn, setSigningIn] = useState(false);
-
-  const handleGoogleLogin = async () => {
-    setSigningIn(true);
-    try {
-      const loggedIn = await signInWithGoogle();
-      showToast(`Xin chào, ${loggedIn.fullName}!`, 'success');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Đăng nhập Google không thành công.';
-      showToast(msg, 'error');
-    } finally {
-      setSigningIn(false);
-    }
-  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,11 +226,10 @@ export function Header({
           ) : (
             <button
               type="button"
-              onClick={handleGoogleLogin}
-              disabled={signingIn}
-              className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
+              onClick={() => onNavigate('/tai-khoan')}
+              className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
             >
-              {signingIn ? 'Đang đăng nhập...' : 'Đăng nhập'}
+              Đăng nhập
             </button>
           )}
 

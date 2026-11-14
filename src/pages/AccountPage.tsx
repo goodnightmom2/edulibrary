@@ -22,8 +22,14 @@ interface ActivityDoc {
 }
 
 export function AccountPage({ onNavigate }: AccountPageProps) {
-  const { user, signInWithGoogle, apiFetch, refreshProfile } = useAuth();
+  const { user, signIn, register, apiFetch, refreshProfile } = useAuth();
   const { showToast } = useToast();
+
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authFullName, setAuthFullName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [submittingAuth, setSubmittingAuth] = useState(false);
 
   const [fullName, setFullName] = useState(user?.fullName || '');
   const [saving, setSaving] = useState(false);
@@ -73,23 +79,113 @@ export function AccountPage({ onNavigate }: AccountPageProps) {
     }
   };
 
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmittingAuth(true);
+    try {
+      if (authMode === 'register') {
+        const created = await register(authFullName.trim(), authEmail.trim(), authPassword);
+        showToast(`Đăng ký thành công! Xin chào, ${created.fullName}.`, 'success');
+      } else {
+        const loggedIn = await signIn(authEmail.trim(), authPassword);
+        showToast(`Xin chào, ${loggedIn.fullName}!`, 'success');
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Thao tác không thành công.', 'error');
+    } finally {
+      setSubmittingAuth(false);
+    }
+  };
+
   if (!user) {
     return (
-      <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-5">
-        <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center mx-auto">
-          <UserIcon className="w-7 h-7" />
+      <div className="max-w-md mx-auto px-4 py-12">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center mx-auto">
+              <UserIcon className="w-6 h-6" />
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">Tài khoản EduLibrary</h1>
+            <p className="text-xs text-slate-600">
+              Đăng nhập hoặc tạo tài khoản để lưu tài liệu yêu thích và theo dõi lịch sử học tập.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-100">
+            <button
+              type="button"
+              onClick={() => setAuthMode('login')}
+              className={`py-2 text-xs font-semibold rounded-md transition-colors ${
+                authMode === 'login' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Đăng nhập
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthMode('register')}
+              className={`py-2 text-xs font-semibold rounded-md transition-colors ${
+                authMode === 'register' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Đăng ký mới
+            </button>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            {authMode === 'register' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Họ và tên</label>
+                <input
+                  type="text"
+                  required
+                  minLength={2}
+                  value={authFullName}
+                  onChange={(e) => setAuthFullName(e.target.value)}
+                  placeholder="Nguyễn Văn A"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-600"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Email</label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="email@example.com"
+                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Mật khẩu</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="Tối thiểu 6 ký tự"
+                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submittingAuth}
+              className="w-full py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold transition-colors disabled:opacity-60"
+            >
+              {submittingAuth
+                ? 'Đang xử lý...'
+                : authMode === 'register'
+                ? 'Tạo tài khoản'
+                : 'Đăng nhập'}
+            </button>
+          </form>
         </div>
-        <h1 className="text-2xl font-bold text-slate-900">Tài khoản cá nhân EduLibrary</h1>
-        <p className="text-sm text-slate-600 leading-relaxed">
-          Đăng nhập bằng Google để lưu tài liệu yêu thích, xem lại lịch sử đã đọc và theo dõi tài liệu đã tải xuống.
-        </p>
-        <button
-          type="button"
-          onClick={() => signInWithGoogle().catch(() => {})}
-          className="px-6 py-3 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold transition-colors"
-        >
-          Đăng nhập với Google
-        </button>
       </div>
     );
   }

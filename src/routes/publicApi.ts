@@ -25,8 +25,8 @@ import {
   recordDocumentDownload,
   recordDocumentView,
 } from '../db/documents.ts';
-import { findUserByEmail, toSafeUser, upsertGoogleUser } from '../db/users.ts';
-import { getAdminAuth } from '../lib/firebase-admin.ts';
+import { z } from 'zod';
+import { findUserByEmail, toSafeUser } from '../db/users.ts';
 import { generateDocumentPreview, type DocumentPreviewPayload } from '../lib/docProcessor.ts';
 import {
   createPresignedDownloadUrl,
@@ -279,54 +279,109 @@ publicApiRouter.get('/documents/:slug/download-url', optionalAuth, async (req: A
   }
 });
 
-// Google OAuth Sign-In synchronization
-publicApiRouter.post('/auth/google', authRateLimiter, async (req, res: Response) => {
+const registerSchema = z.object({
+  fullName: z.string().trim().min(2, 'Họ và tên tối thiểu 2 ký tự.').max(120),
+  email: z.string().trim().email('Email không hợp lệ.').max(200),
+  password: z.string().min(6, 'Mật khẩu tối thiểu 6 ký tự.').max(200),
+});
+
+async function issueUserSession(req: AuthRequest, res: Response, userRow: typeof users.$inferSelect) {
+  const safeUser = toSafeUser(userRow);
+  const sessionToken = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
+  await db.insert(sessions).values({
+    sessionToken,
+    userId: safeUser.id,
+    userAgent: req.headers['user-agent']?.slice(0, 250) || null,
+    ipAddress: req.ip || null,
+    expiresAt,
+  });
+
+  const token = signAdminSessionToken(safeUser, sessionToken);
+  res.cookie(ADMIN_COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 12 * 60 * 60 * 1000,
+  });
+
+  return { user: safeUser, token };
+}
+
+// Register new user account (Email + Password)
+publicApiRouter.post('/auth/register', authRateLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    const bodyToken = typeof req.body?.idToken === 'string' ? req.body.idToken : undefined;
-    const token = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice('Bearer '.length).trim()
-      : bodyToken;
-
-    if (!token) {
-      return res.status(401).json({ error: 'Thiếu mã xác thực Google.' });
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || 'Thông tin đăng ký không hợp lệ.' });
+    }
+    const email = parsed.data.email.toLowerCase();
+    const existing = await findUserByEmail(email);
+    if (existing) {
+      return res.status(409).json({ error: 'Email này đã được đăng ký. Vui lòng đăng nhập.' });
     }
 
-    const adminAuth = await getAdminAuth();
-    const decoded = await adminAuth.verifyIdToken(token);
-    if (!decoded.email) {
-      return res.status(400).json({ error: 'Tài khoản Google không có email hợp lệ.' });
-    }
-
-    const user = await upsertGoogleUser({
-      uid: decoded.uid,
-      email: decoded.email.toLowerCase(),
-      fullName: decoded.name || decoded.email.split('@')[0],
-      avatar: decoded.picture || null,
-    });
-
-    if (user.status === 'LOCKED') {
-      return res.status(403).json({ error: 'Tài khoản của bạn đã bị khóa.' });
-    }
+    const passwordHash = await bcrypt.hash(parsed.data.password, 10);
+    const uid = `user-${crypto.randomUUID().slice(0, 12)}`;
+    const [created] = await db
+      .insert(users)
+      .values({
+        uid,
+        fullName: parsed.data.fullName,
+        email,
+        passwordHash,
+        role: 'USER',
+        status: 'ACTIVE',
+      })
+      .returning();
 
     await db
       .insert(accounts)
       .values({
-        userId: user.id,
-        provider: 'google',
-        providerAccountId: decoded.uid,
+        userId: created.id,
+        provider: 'credentials',
+        providerAccountId: email,
       })
       .onConflictDoNothing();
 
-    res.json({ user });
+    const sessionPayload = await issueUserSession(req, res, created);
+    res.status(201).json(sessionPayload);
   } catch (error) {
-    console.error('POST /api/auth/google error:', error);
-    res.status(401).json({ error: 'Xác thực Google thất bại.' });
+    console.error('POST /api/auth/register error:', error);
+    res.status(500).json({ error: 'Đăng ký tài khoản thất bại.' });
+  }
+});
+
+// Standard user login (Email + Password)
+publicApiRouter.post('/auth/login', authRateLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const parsed = adminLoginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || 'Dữ liệu đăng nhập không hợp lệ.' });
+    }
+    const email = parsed.data.email.toLowerCase();
+    const userRow = await findUserByEmail(email);
+    if (!userRow || !userRow.passwordHash) {
+      return res.status(401).json({ error: 'Email hoặc mật khẩu không chính xác.' });
+    }
+    if (userRow.status === 'LOCKED') {
+      return res.status(403).json({ error: 'Tài khoản của bạn đã bị khóa.' });
+    }
+    const valid = await bcrypt.compare(parsed.data.password, userRow.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Email hoặc mật khẩu không chính xác.' });
+    }
+
+    const sessionPayload = await issueUserSession(req, res, userRow);
+    res.json(sessionPayload);
+  } catch (error) {
+    console.error('POST /api/auth/login error:', error);
+    res.status(500).json({ error: 'Đăng nhập thất bại.' });
   }
 });
 
 // Separate secure Admin login
-publicApiRouter.post('/auth/admin/login', authRateLimiter, async (req, res: Response) => {
+publicApiRouter.post('/auth/admin/login', authRateLimiter, async (req: AuthRequest, res: Response) => {
   try {
     const parsed = adminLoginSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -349,27 +404,8 @@ publicApiRouter.post('/auth/admin/login', authRateLimiter, async (req, res: Resp
       return res.status(401).json({ error: 'Email hoặc mật khẩu quản trị không chính xác.' });
     }
 
-    const safeUser = toSafeUser(userRow);
-    const sessionToken = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
-    await db.insert(sessions).values({
-      sessionToken,
-      userId: safeUser.id,
-      userAgent: req.headers['user-agent']?.slice(0, 250) || null,
-      ipAddress: req.ip || null,
-      expiresAt,
-    });
-
-    const token = signAdminSessionToken(safeUser, sessionToken);
-
-    res.cookie(ADMIN_COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 12 * 60 * 60 * 1000,
-    });
-
-    res.json({ user: safeUser, token });
+    const sessionPayload = await issueUserSession(req, res, userRow);
+    res.json(sessionPayload);
   } catch (error) {
     console.error('POST /api/auth/admin/login error:', error);
     res.status(500).json({ error: 'Đăng nhập quản trị thất bại.' });
