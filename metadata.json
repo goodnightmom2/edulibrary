@@ -1,0 +1,6 @@
+{
+  "name": "EduLibrary",
+  "description": "Thư viện học liệu trực tuyến — chia sẻ, đọc trực tiếp và tải xuống tài liệu học tập Word, PDF, đề thi, giáo án, chuyên đề với hiển thị công thức Toán - Lý - Hóa chuẩn xác.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
