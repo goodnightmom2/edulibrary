@@ -93,7 +93,7 @@ export async function processDocumentJob(jobId: number): Promise<void> {
     const preview = await generateDocumentPreview(fullPath, doc.fileType);
 
     const previewFilename = `${doc.slug}-preview.json`;
-    const previewJson = JSON.stringify(preview);
+    const previewJson = JSON.stringify(preview).replace(/\u0000/g, '').replace(/\\u0000/g, '');
     const uploadedPreview = await uploadStoredObject(
       'previews',
       previewFilename,
@@ -124,7 +124,7 @@ export async function processDocumentJob(jobId: number): Promise<void> {
       .set({
         previewPath: previewJson,
         previewStorageKey: uploadedPreview.storageKey,
-        mathMeta: JSON.stringify(preview.mathMeta),
+        mathMeta: JSON.stringify(preview.mathMeta).replace(/\u0000/g, '').replace(/\\u0000/g, ''),
         processingStatus: 'COMPLETED',
         processingError: null,
         updatedAt: new Date(),
@@ -135,13 +135,15 @@ export async function processDocumentJob(jobId: number): Promise<void> {
       .update(processingJobs)
       .set({
         status: 'COMPLETED',
-        mathReport,
+        mathReport: mathReport.replace(/\u0000/g, '').replace(/\\u0000/g, ''),
         completedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(processingJobs.id, jobId));
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Lỗi không xác định khi xử lý tài liệu.';
+    const baseMsg = err instanceof Error ? err.message : 'Lỗi không xác định khi xử lý tài liệu.';
+    const causeMsg = (err as { cause?: { message?: string } })?.cause?.message;
+    const message = causeMsg ? `${causeMsg} (${baseMsg})` : baseMsg;
     await db
       .update(documents)
       .set({
