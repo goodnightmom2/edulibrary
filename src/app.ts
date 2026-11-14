@@ -30,7 +30,25 @@ export function createServerApp() {
     next();
   });
 
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', async (req, res) => {
+    if (req.query.db === '1') {
+      try {
+        await ensureSeeded();
+        return res.json({
+          status: 'ok',
+          db: 'connected',
+          service: 'edulibrary-cloud',
+          storage: getStorageStatus().provider,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        return res.status(503).json({
+          status: 'error',
+          db: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     res.json({
       status: 'ok',
       service: 'edulibrary-cloud',
@@ -138,6 +156,7 @@ export function createServerApp() {
       console.error('Database initialization error:', error);
       res.status(503).json({
         error: 'Hệ thống đang khởi tạo cơ sở dữ liệu. Vui lòng thử lại sau giây lát.',
+        detail: error instanceof Error ? error.message : String(error),
       });
     }
   });
