@@ -10,7 +10,9 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { sanitizeFilename } from './slug.ts';
 
-const BASE_STORAGE = path.resolve(process.cwd(), process.env.STORAGE_DIR || 'storage');
+const BASE_STORAGE = process.env.VERCEL
+  ? path.resolve('/tmp/edulibrary-storage')
+  : path.resolve(process.cwd(), process.env.STORAGE_DIR || 'storage');
 export const DOCUMENTS_DIR = path.join(BASE_STORAGE, 'documents');
 export const PREVIEWS_DIR = path.join(BASE_STORAGE, 'previews');
 export const THUMBNAILS_DIR = path.join(BASE_STORAGE, 'thumbnails');
