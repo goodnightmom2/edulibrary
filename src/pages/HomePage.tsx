@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, Award, BookMarked, FolderOpen, Search } from 'lucide-react';
 import { DocumentCard } from '../components/DocumentCard.tsx';
 import { LatestSidebar } from '../components/LatestSidebar.tsx';
-import { HERO_BANNER_IMAGE } from '../lib/assets.ts';
 import type {
   CategoryItem,
   DocumentSummary,
@@ -105,14 +104,12 @@ export function HomePage({
     onNavigate(q ? `/tai-lieu?q=${encodeURIComponent(q)}` : '/tai-lieu');
   };
 
-  const bannerImg = settings.featuredBannerUrl || HERO_BANNER_IMAGE;
-
   return (
     <div>
       {/* Hero Banner */}
       <section className="bg-gradient-to-br from-blue-900 via-blue-800 to-blue-700 text-white border-b border-blue-950/20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 lg:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-          <div className="lg:col-span-7 space-y-5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 lg:py-12">
+          <div className="max-w-3xl space-y-5">
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight leading-tight text-balance">
               {settings.bannerTitle || 'Kho tài liệu học tập, đề thi và giáo án chuẩn hóa'}
             </h1>
@@ -155,19 +152,6 @@ export function HomePage({
                   {cat.name}
                 </button>
               ))}
-            </div>
-          </div>
-
-          {/* Right Hero Image */}
-          <div className="lg:col-span-5 hidden lg:block">
-            <div className="relative rounded-xl overflow-hidden border border-white/20 shadow-xl aspect-[16/10] bg-blue-950">
-              <img
-                src={bannerImg}
-                alt="Không gian học tập trực tuyến EduLibrary"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-blue-950/60 via-transparent to-transparent" />
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Download, Eye, FileText } from 'lucide-react';
-import { formatDateVi, getDocumentThumbnailUrl } from '../lib/assets.ts';
+import { formatDateVi } from '../lib/assets.ts';
 import type { DocumentSummary } from '../types/library.ts';
 
 interface DocumentCardProps {
@@ -9,17 +9,9 @@ interface DocumentCardProps {
 }
 
 export function DocumentCard({ doc, onOpen }: DocumentCardProps) {
-  const [imgError, setImgError] = useState(false);
-  const subjectThumb = getDocumentThumbnailUrl(doc.thumbnail, doc.subjectSlug);
-  const thumbUrl = doc.thumbnail
-    ? doc.thumbnail
-    : doc.fileType === 'pdf'
-    ? null
-    : subjectThumb;
-
   return (
     <article className="group bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col hover:border-blue-300 hover:shadow-md transition-all duration-200">
-      {/* Cover thumbnail or clean academic fallback */}
+      {/* Lightweight academic cover without image assets */}
       <a
         href={`/tai-lieu/${doc.slug}`}
         onClick={(e) => {
@@ -28,24 +20,14 @@ export function DocumentCard({ doc, onOpen }: DocumentCardProps) {
         }}
         className="relative aspect-[16/10] bg-gradient-to-br from-blue-50 via-slate-50 to-slate-100 overflow-hidden block border-b border-slate-100"
       >
-        {thumbUrl && !imgError ? (
-          <img
-            src={thumbUrl}
-            alt={doc.title}
-            referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-          />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center">
-            <div className="w-11 h-11 rounded-lg bg-white border border-blue-200 flex items-center justify-center text-blue-700 mb-2 shadow-xs">
-              <FileText className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-semibold text-blue-900 line-clamp-1">
-              {doc.subjectName || 'Tài liệu học tập'}
-            </span>
+        <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-11 h-11 rounded-lg bg-white border border-blue-200 flex items-center justify-center text-blue-700 mb-2 shadow-xs">
+            <FileText className="w-5 h-5" />
           </div>
-        )}
+          <span className="text-xs font-semibold text-blue-900 line-clamp-1">
+            {doc.subjectName || 'Tài liệu học tập'}
+          </span>
+        </div>
         <span className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-slate-900/80 text-white font-mono text-[11px] font-semibold uppercase tracking-wide">
           {doc.fileType}
         </span>

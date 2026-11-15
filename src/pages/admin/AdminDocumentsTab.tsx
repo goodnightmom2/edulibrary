@@ -59,7 +59,6 @@ export function AdminDocumentsTab({
   const [featured, setFeatured] = useState(false);
   const [docxFile, setDocxFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [thumbFile, setThumbFile] = useState<File | null>(null);
   const [dragTarget, setDragTarget] = useState<'docx' | 'pdf' | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
@@ -99,7 +98,6 @@ export function AdminDocumentsTab({
     setFeatured(false);
     setDocxFile(null);
     setPdfFile(null);
-    setThumbFile(null);
     setUploadProgress(0);
     setModalOpen(true);
   };
@@ -118,7 +116,6 @@ export function AdminDocumentsTab({
     setFeatured(doc.featured);
     setDocxFile(null);
     setPdfFile(null);
-    setThumbFile(null);
     setUploadProgress(0);
     setModalOpen(true);
   };
@@ -203,7 +200,6 @@ export function AdminDocumentsTab({
       fd.append('featured', String(featured));
       if (docxFile) fd.append('docxFile', docxFile);
       if (pdfFile) fd.append('pdfFile', pdfFile);
-      if (thumbFile) fd.append('thumbnail', thumbFile);
 
       const { ok, data } = await uploadSingleWithProgress(
         editingDoc ? `/api/admin/documents/${editingDoc.id}` : '/api/admin/documents',
@@ -802,19 +798,6 @@ export function AdminDocumentsTab({
                     <option value="PUBLISHED">Xuất bản ngay</option>
                     <option value="DRAFT">Lưu bản nháp</option>
                   </select>
-                </div>
-
-                <div>
-                  <label htmlFor="doc-thumb" className="block text-xs font-semibold text-slate-700 mb-1">
-                    Ảnh đại diện tùy chọn
-                  </label>
-                  <input
-                    id="doc-thumb"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setThumbFile(e.target.files?.[0] || null)}
-                    className="w-full text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-slate-100 file:text-slate-700"
-                  />
                 </div>
 
                 <div className="sm:col-span-2 flex items-center gap-2 pt-1">
