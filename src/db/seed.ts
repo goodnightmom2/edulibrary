@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { count, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { db } from './index.ts';
 import {
   categories,
@@ -57,7 +57,7 @@ const DEFAULT_SETTINGS: Array<{ key: string; value: string }> = [
   },
   { key: 'contactEmail', value: 'hotro@edulibrary.vn' },
   { key: 'contactPhone', value: '(028) 3822 6868' },
-  { key: 'contactAddress', value: 'Quận 1, Thành phố Hồ Chí Minh' },
+  { key: 'contactAddress', value: 'P.Tân Ninh, Tây Ninh' },
   {
     key: 'footerText',
     value: '© 2026 EduLibrary — Thư viện học liệu trực tuyến. Phục vụ cộng đồng giáo dục Việt Nam.',
@@ -137,6 +137,17 @@ export async function seedDatabase(): Promise<void> {
       })
       .onConflictDoNothing();
   }
+
+  // Sync legacy default contactAddress to current location
+  await db
+    .update(siteSettings)
+    .set({ settingValue: 'P.Tân Ninh, Tây Ninh', updatedAt: new Date() })
+    .where(
+      and(
+        eq(siteSettings.settingKey, 'contactAddress'),
+        eq(siteSettings.settingValue, 'Quận 1, Thành phố Hồ Chí Minh')
+      )
+    );
 
   // 5. Initial Admin account (configured via env; dev fallback only outside production)
   const adminEmail = (

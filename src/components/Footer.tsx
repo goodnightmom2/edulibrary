@@ -60,23 +60,9 @@ export function Footer({ settings, subjects, onNavigate }: FooterProps) {
               <span>{settings.contactPhone}</span>
             </div>
           )}
-          {settings.contactAddress && (
-            <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-blue-700 shrink-0" />
-              <span>{settings.contactAddress}</span>
-            </div>
-          )}
-          <div className="pt-2">
-            <a
-              href="/admin"
-              onClick={(e) => {
-                e.preventDefault();
-                onNavigate('/admin');
-              }}
-              className="text-xs font-medium text-slate-500 hover:text-blue-700 underline underline-offset-4"
-            >
-              Cổng quản trị viên
-            </a>
+          <div className="flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-blue-700 shrink-0" />
+            <span>{settings.contactAddress || 'P.Tân Ninh, Tây Ninh'}</span>
           </div>
         </div>
       </div>

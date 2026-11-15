@@ -33,7 +33,7 @@ export function AdminSettingsTab({ settings, onRefreshTaxonomy }: AdminSettingsT
     featuredBannerUrl: settings.featuredBannerUrl || '',
     contactEmail: settings.contactEmail || '',
     contactPhone: settings.contactPhone || '',
-    contactAddress: settings.contactAddress || '',
+    contactAddress: settings.contactAddress || 'P.Tân Ninh, Tây Ninh',
     footerText: settings.footerText || '',
   });
   const [saving, setSaving] = useState(false);
@@ -137,6 +137,16 @@ export function AdminSettingsTab({ settings, onRefreshTaxonomy }: AdminSettingsT
               type="text"
               value={form.contactPhone}
               onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Địa chỉ liên hệ</label>
+            <input
+              type="text"
+              value={form.contactAddress}
+              onChange={(e) => setForm({ ...form, contactAddress: e.target.value })}
+              placeholder="P.Tân Ninh, Tây Ninh"
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
           </div>
